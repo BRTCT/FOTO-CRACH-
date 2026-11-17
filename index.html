@@ -100,6 +100,12 @@
   @keyframes gira{to{transform:rotate(360deg);}}
   .ok-anim{width:76px;height:76px;border-radius:50%;background:#2e9e44;display:flex;align-items:center;justify-content:center;animation:pop .45s cubic-bezier(.3,1.5,.5,1) both;}
   @keyframes pop{from{transform:scale(.3);opacity:0;}to{transform:none;opacity:1;}}
+  .faixa{display:flex;align-items:center;gap:10px;margin:0 0 14px;padding:11px 13px;border-radius:14px;font-size:13px;background:#fff8e6;border:1px solid #f1dcb0;color:#6b4a00;}
+  .faixa.envio{background:#eef5fb;border-color:#cfe1f1;color:#1d4f7a;}
+  .faixa b{font-weight:700;} .faixa .flex{flex:1;}
+  .faixa button{border:1px solid #d9c38a;background:#fff;border-radius:10px;padding:7px 11px;font-size:13px;font-weight:600;color:#6b4a00;cursor:pointer;}
+  .lista .faixa{margin:0;}
+  .st.pend{background:#fff1d6;color:#8a5a00;}
   .toast{position:fixed;left:16px;right:16px;bottom:max(18px, env(safe-area-inset-bottom));background:#1f1f1f;color:#fff;padding:13px 16px;border-radius:14px;font-size:14px;z-index:50;opacity:0;transform:translateY(10px);transition:all .25s;text-align:center;}
   .toast.on{opacity:1;transform:none;} .toast.erro{background:#b3261e;}
 </style>
@@ -133,6 +139,7 @@
 <div class="tela hidden" id="t-inicio">
   <div class="topo"><div class="logo" style="width:120px;height:34px"></div><div class="flex"></div><button class="ib" id="bt-sair" title="Sair"><svg class="ico" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg></button></div>
   <div class="conteudo">
+    <div class="faixa hidden" id="faixa-ini"></div>
     <div class="ola">Olá, <b id="ola-nome"></b>. Escolha o controle:</div>
     <div class="opcoes">
       <button class="op" data-c="pcv" style="--c:#1d6fa5;--c2:#e8f1f9"><span class="ic"><svg class="ico" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></svg></span><span><b>PCV</b><small id="n-pcv">carregando...</small></span><span class="seta"><svg class="ico" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></span></button>
@@ -146,6 +153,7 @@
   <div class="topo"><button class="ib" id="bt-voltar" title="Voltar"><svg class="ico" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg></button><div class="flex"><h1 id="lista-tit"></h1><small id="lista-sub"></small></div></div>
   <div class="busca">
     <input class="campo" id="busca" placeholder="Buscar colaborador..." autocomplete="off">
+    <div class="faixa hidden" id="faixa-lista" style="margin:8px 0 0"></div>
     <div class="filtro" id="filtro"><button data-f="" class="on">Todos</button><button data-f="sem">Sem foto</button><button data-f="com">Com foto</button></div>
   </div>
   <div class="lista" id="lista"></div>
@@ -215,16 +223,26 @@ function tecla(k){
   PIN += k; pontos(); $('pin-msg').textContent = '';
   if(PIN.length === 4) conferirPin();
 }
+var PIN_OFF = 'fotos_campo_pin';
+function semRede(e){ return !navigator.onLine || (e && (e.name === 'TypeError' || /Failed to fetch|NetworkError|Load failed/i.test(String(e.message || '')))); }
 async function conferirPin(){
   try{
-    var r = (await api('tecnico_acesso?select=pin_hash,ativo&codigo=eq.' + encodeURIComponent(CODIGO)))[0];
+    var r;
+    try{ r = (await api('tecnico_acesso?select=pin_hash,ativo&codigo=eq.' + encodeURIComponent(CODIGO)))[0]; if(r) try{ localStorage.setItem(PIN_OFF, JSON.stringify({ k:CODIGO, h:r.pin_hash, ativo:r.ativo !== false })); }catch(x){} }
+    catch(e){
+      /* sem internet: confere com o PIN guardado da última vez que entrou com internet */
+      if(!semRede(e)) throw e;
+      var g = null; try{ g = JSON.parse(localStorage.getItem(PIN_OFF) || 'null'); }catch(x){}
+      if(!g || g.k !== CODIGO) throw new Error('offline');
+      r = { pin_hash:g.h, ativo:g.ativo };
+    }
     if(!r || r.ativo === false) throw new Error('link');
     if(await sha(CODIGO + ':' + PIN) !== r.pin_hash) throw new Error('pin');
     try{ localStorage.setItem(SESSAO, JSON.stringify({ k:CODIGO, ate:Date.now() + DURACAO })); }catch(e){}
     PIN = ''; pontos(); depoisDoPin();
   } catch(e){
     var m = String(e.message || e);
-    $('pin-msg').textContent = m === 'pin' ? 'PIN incorreto.' : m === 'link' ? 'Este link não está mais ativo. Peça o link novo ao SESMT.' : 'Sem conexão com o servidor. Tente de novo.';
+    $('pin-msg').textContent = m === 'pin' ? 'PIN incorreto.' : m === 'link' ? 'Este link não está mais ativo. Peça o link novo ao SESMT.' : m === 'offline' ? 'Sem internet. Entre uma vez com internet neste celular para liberar o uso offline.' : 'Sem conexão com o servidor. Tente de novo.';
     $('pontos').classList.add('erro'); setTimeout(function(){ $('pontos').classList.remove('erro'); PIN = ''; pontos(); }, 450);
   }
 }
@@ -235,6 +253,60 @@ function depoisDoPin(){
   inicio();
 }
 
+/* ---------- sem internet: fila de fotos no celular ----------
+   A foto tirada sem internet fica guardada no próprio celular (IndexedDB) e é
+   enviada sozinha quando a conexão volta. Foto nova do mesmo colaborador no
+   mesmo controle substitui a que ainda estava na fila. */
+var CACHE = 'fotos_campo_cache';
+var FILA = { db:null, itens:[], enviando:false };
+function filaDb(){
+  if(FILA.db) return Promise.resolve(FILA.db);
+  return new Promise(function(ok, falha){
+    var r = indexedDB.open('fotos_campo', 1);
+    r.onupgradeneeded = function(){ r.result.createObjectStore('fila', { keyPath:'id' }); };
+    r.onsuccess = function(){ FILA.db = r.result; ok(r.result); };
+    r.onerror = function(){ falha(r.error); };
+  });
+}
+function filaOp(modo, fn){ return filaDb().then(function(db){ return new Promise(function(ok, falha){ var t = db.transaction('fila', modo), st = t.objectStore('fila'), q = fn(st); t.oncomplete = function(){ ok(q && q.result); }; t.onerror = function(){ falha(t.error); }; }); }); }
+function filaLer(){ return filaOp('readonly', function(st){ return st.getAll(); }).then(function(l){ FILA.itens = l || []; return FILA.itens; }).catch(function(){ return FILA.itens; }); }
+function filaPor(item){ return filaOp('readwrite', function(st){ return st.put(item); }).then(filaLer); }
+function filaTirar(id){ return filaOp('readwrite', function(st){ return st.delete(id); }).then(filaLer); }
+function aplicarFila(){ FILA.itens.forEach(function(it){ if(ST.fotos[it.controle]) ST.fotos[it.controle][it.nome] = { controle:it.controle, colaborador:it.nome, tirada_em:it.tirada_em, tecnico:it.tecnico, pendente:true }; }); }
+function faixas(){
+  var n = FILA.itens.length, html = '', cls = '';
+  if(FILA.enviando){ html = '<span class="flex">Enviando <b>' + n + '</b> foto(s) tirada(s) sem internet...</span>'; cls = 'envio'; }
+  else if(!navigator.onLine) html = '<span class="flex"><b>Sem internet.</b> ' + (n ? '<b>' + n + '</b> foto(s) guardada(s) no celular; serão enviadas quando a conexão voltar.' : 'Pode tirar as fotos normalmente: elas ficam guardadas no celular e são enviadas quando a conexão voltar.') + '</span>';
+  else if(n) html = '<span class="flex"><b>' + n + '</b> foto(s) aguardando envio.</span><button type="button" class="enviar-ja">Enviar agora</button>';
+  ['faixa-ini','faixa-lista'].forEach(function(id){ var el = $(id); el.className = 'faixa' + (cls ? ' ' + cls : '') + (html ? '' : ' hidden'); el.innerHTML = html; var b = el.querySelector('.enviar-ja'); if(b) b.onclick = function(){ sincronizar(true); }; });
+}
+async function subirFoto(c, nome, blob, tirada_em, tecnico){
+  var caminho = c + '/' + slug(nome) + '.jpg';
+  var r = await fetch(SB_URL + '/storage/v1/object/embarque-fotos/' + caminho, { method:'POST', headers:{ apikey:SB_KEY, Authorization:'Bearer ' + SB_KEY, 'Content-Type':'image/jpeg', 'x-upsert':'true', 'cache-control':'no-cache' }, body:blob });
+  if(!r.ok){ var t = await r.text(); throw new Error(t); }
+  var reg = { controle:c, colaborador:nome, caminho:caminho, tirada_em:tirada_em, tecnico:tecnico };
+  await api('emb_fotos?on_conflict=controle,colaborador', { method:'POST', body:JSON.stringify(reg), headers:{ Prefer:'resolution=merge-duplicates,return=minimal' } });
+  return reg;
+}
+async function sincronizar(avisar){
+  if(FILA.enviando || !navigator.onLine) return;
+  await filaLer(); if(!FILA.itens.length){ faixas(); return; }
+  FILA.enviando = true; faixas();
+  var ok = 0, falhou = false;
+  for(var i = 0; i < FILA.itens.length; i++){
+    var it = FILA.itens[i];
+    try{ var reg = await subirFoto(it.controle, it.nome, it.blob, it.tirada_em, it.tecnico); await filaTirar(it.id); i--; ok++; if(ST.fotos[it.controle]) ST.fotos[it.controle][it.nome] = reg; }
+    catch(e){ falhou = true; break; }
+  }
+  FILA.enviando = false; faixas(); contadores(); if(!$('t-lista').classList.contains('hidden')) desenharLista();
+  if(ok) toast(ok + ' foto(s) tirada(s) sem internet ' + (ok === 1 ? 'foi enviada' : 'foram enviadas') + '.');
+  else if(falhou && avisar) toast('Ainda não foi possível enviar. Tente de novo com internet melhor.', true);
+}
+window.addEventListener('online', function(){ faixas(); sincronizar(); carregar().catch(function(){}); });
+window.addEventListener('offline', faixas);
+document.addEventListener('visibilitychange', function(){ if(!document.hidden) sincronizar(); });
+setInterval(function(){ if(navigator.onLine && FILA.itens.length) sincronizar(); }, 30000);
+
 /* ---------- dados ---------- */
 function pagina(tab, sel, ordem){
   var todos = [];
@@ -242,11 +314,22 @@ function pagina(tab, sel, ordem){
   return pag(0);
 }
 async function carregar(){
-  var res = await Promise.all([
-    pagina('emb_doc_pcv', 'colaborador,cc,funcao,status', 'colaborador.asc').catch(function(){ return []; }),
-    pagina('emb_cracha_nr', 'colaborador,cc,cargo', 'colaborador.asc').catch(function(){ return []; }),
-    pagina('emb_fotos', 'controle,colaborador,tirada_em,tecnico', 'colaborador.asc').catch(function(){ return []; })
-  ]);
+  await filaLer();
+  var res;
+  try{
+    if(!navigator.onLine) throw new TypeError('offline');
+    res = await Promise.all([
+      pagina('emb_doc_pcv', 'colaborador,cc,funcao,status', 'colaborador.asc'),
+      pagina('emb_cracha_nr', 'colaborador,cc,cargo', 'colaborador.asc'),
+      pagina('emb_fotos', 'controle,colaborador,tirada_em,tecnico', 'colaborador.asc').catch(function(){ return []; })
+    ]);
+    try{ localStorage.setItem(CACHE, JSON.stringify({ em:Date.now(), res:res })); }catch(e){}
+  } catch(e){
+    /* sem internet: usa a última lista guardada no celular */
+    var g = null; try{ g = JSON.parse(localStorage.getItem(CACHE) || 'null'); }catch(x){}
+    if(!g){ faixas(); throw e; }
+    res = g.res;
+  }
   function unicos(rows, campoFuncao, pular){
     var m = {};
     rows.forEach(function(r){ var k = chave(r.colaborador); if(!k || (pular && pular(r))) return; if(!m[k]) m[k] = { nome:k, cc:r.cc || '', funcao:r[campoFuncao] || '' }; });
@@ -256,7 +339,8 @@ async function carregar(){
   ST.pessoas.cracha = unicos(res[1], 'cargo');
   ST.fotos = { pcv:{}, cracha:{} };
   res[2].forEach(function(f){ if(ST.fotos[f.controle]) ST.fotos[f.controle][chave(f.colaborador)] = f; });
-  contadores();
+  aplicarFila(); contadores(); faixas();
+  if(navigator.onLine && FILA.itens.length) sincronizar();
 }
 function contadores(){
   ['pcv','cracha'].forEach(function(c){
@@ -269,7 +353,7 @@ function contadores(){
 async function inicio(){
   $('ola-nome').textContent = nomeTec().split(' ')[0];
   tela('t-inicio');
-  try{ await carregar(); }catch(e){ toast('Não foi possível carregar os colaboradores. Verifique a internet.', true); }
+  try{ await carregar(); }catch(e){ toast(navigator.onLine ? 'Não foi possível carregar os colaboradores. Verifique a internet.' : 'Sem internet e a lista ainda não foi guardada neste celular. Abra uma vez com internet.', true); }
 }
 function abrirLista(c){
   ST.controle = c; $('busca').value = ''; ST.filtro = '';
@@ -291,7 +375,7 @@ function desenharLista(){
     var f = ST.fotos[c][p.nome];
     return '<button class="pessoa" data-n="' + esc(p.nome) + '" style="animation-delay:' + Math.min(i, 15) * 18 + 'ms"><span class="av' + (f ? ' tem' : '') + '">' + esc(iniciais(p.nome)) + '</span>'
       + '<span class="tx"><b>' + esc(p.nome) + '</b><small>' + esc([p.cc ? 'CC ' + p.cc : '', p.funcao].filter(Boolean).join(' · ') || '-') + '</small></span>'
-      + '<span class="st ' + (f ? 'ok">&#10003; ' + new Date(f.tirada_em).toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit' }) : 'nao">sem foto') + '</span></button>';
+      + '<span class="st ' + (f ? (f.pendente ? 'pend">&#9203; aguardando envio' : 'ok">&#10003; ' + new Date(f.tirada_em).toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit' })) : 'nao">sem foto') + '</span></button>';
   }).join('') : '<div class="vazio">' + (ST.pessoas[c].length ? 'Ninguém encontrado.' : 'Nenhum colaborador cadastrado neste controle.') + '</div>';
   $('lista').querySelectorAll('.pessoa').forEach(function(b){ b.onclick = function(){ abrirCamera(b.dataset.n); }; });
 }
@@ -341,21 +425,30 @@ function daGaleria(file){
   img.onerror = function(){ toast('Não foi possível ler a imagem.', true); };
   img.src = URL.createObjectURL(file);
 }
+function concluido(txt){
+  $('env-roda').className = 'ok-anim'; $('env-roda').innerHTML = '<svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+  $('env-txt').textContent = txt;
+  if(navigator.vibrate) navigator.vibrate([20, 40, 20]);
+  setTimeout(function(){ $('enviando').classList.add('hidden'); fecharCamera(); contadores(); faixas(); desenharLista(); }, txt.length > 20 ? 1600 : 900);
+}
+async function guardarNoCelular(c, nome, blob, tirada_em){
+  await filaPor({ id:c + '|' + nome, controle:c, nome:nome, blob:blob, tirada_em:tirada_em, tecnico:nomeTec() });
+  ST.fotos[c][nome] = { controle:c, colaborador:nome, tirada_em:tirada_em, tecnico:nomeTec(), pendente:true };
+}
 async function enviar(){
   if(!ST.blob) return;
-  var c = ST.controle, nome = ST.alvo, caminho = c + '/' + slug(nome) + '.jpg';
-  $('enviando').classList.remove('hidden'); $('env-roda').className = 'roda'; $('env-roda').innerHTML = ''; $('env-txt').textContent = 'Enviando foto...';
+  var c = ST.controle, nome = ST.alvo, quando = new Date().toISOString();
+  $('enviando').classList.remove('hidden'); $('env-roda').className = 'roda'; $('env-roda').innerHTML = ''; $('env-txt').textContent = navigator.onLine ? 'Enviando foto...' : 'Guardando no celular...';
   try{
-    var r = await fetch(SB_URL + '/storage/v1/object/embarque-fotos/' + caminho, { method:'POST', headers:{ apikey:SB_KEY, Authorization:'Bearer ' + SB_KEY, 'Content-Type':'image/jpeg', 'x-upsert':'true', 'cache-control':'no-cache' }, body:ST.blob });
-    if(!r.ok){ var t = await r.text(); throw new Error(t); }
-    var reg = { controle:c, colaborador:nome, caminho:caminho, tirada_em:new Date().toISOString(), tecnico:nomeTec() };
-    await api('emb_fotos?on_conflict=controle,colaborador', { method:'POST', body:JSON.stringify(reg), headers:{ Prefer:'resolution=merge-duplicates,return=minimal' } });
-    ST.fotos[c][nome] = reg;
-    $('env-roda').className = 'ok-anim'; $('env-roda').innerHTML = '<svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
-    $('env-txt').textContent = 'Foto salva!';
-    if(navigator.vibrate) navigator.vibrate([20, 40, 20]);
-    setTimeout(function(){ $('enviando').classList.add('hidden'); fecharCamera(); contadores(); desenharLista(); }, 900);
+    if(!navigator.onLine){ await guardarNoCelular(c, nome, ST.blob, quando); concluido('Foto guardada no celular. Será enviada quando houver internet.'); return; }
+    ST.fotos[c][nome] = await subirFoto(c, nome, ST.blob, quando, nomeTec());
+    await filaTirar(c + '|' + nome).catch(function(){});
+    concluido('Foto salva!');
   } catch(e){
+    if(semRede(e)){
+      try{ await guardarNoCelular(c, nome, ST.blob, quando); concluido('Sem conexão: foto guardada no celular. Será enviada quando a internet voltar.'); return; }
+      catch(x){ $('enviando').classList.add('hidden'); toast('Não foi possível guardar a foto no celular: ' + (x.message || x), true); return; }
+    }
     $('enviando').classList.add('hidden');
     var m = String(e.message || e);
     toast(/bucket|policy|security|403|42P01|emb_fotos/i.test(m) ? 'O servidor recusou a foto: falta configurar o Supabase (sesmt_fotos_campo.sql).' : 'Não foi possível enviar. Verifique a internet e tente de novo.', true);
@@ -379,6 +472,9 @@ $('arq').onchange = function(e){ daGaleria(e.target.files[0]); e.target.value = 
 $('outra').onclick = function(){ ST.blob = null; modoTirar(); ligarCamera(); };
 $('usar').onclick = enviar;
 window.addEventListener('pagehide', pararCamera);
+/* guarda esta página no celular para abrir sem internet (usa o sw.js publicado ao lado) */
+if('serviceWorker' in navigator && /^https?:/.test(location.protocol)) navigator.serviceWorker.register('sw.js').catch(function(){});
+faixas();
 if(!CODIGO){ $('pin-txt').textContent = 'Link incompleto. Abra pelo link enviado pelo SESMT.'; $('teclado').classList.add('hidden'); $('pontos').classList.add('hidden'); }
 else if(sessaoValida()) depoisDoPin();
 </script>
